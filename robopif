@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import sys
+import praw
+import re
+import argparse
+
+def read_cli_args(argv):
+    ''' 
+    Read user-supplied sarguments from the command line. 
+    '''
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-u','--pif_url', help='The url for the PIF.', required=True)
+    parser.add_argument('-k','--min_karma', type=int, help='Number of karma points required to participate.', required=False)
+    args = parser.parse_args()
+    # Default to zero karma requirement if no requirement is provided.
+    if args.min_karma == None: min_karma = 0
+    else: min_karma = int(args.min_karma)
+    return args.pif_url, min_karma
+
+def new_client():
+    ''' 
+    Authenticate with reddit, return a PRAW client ( https://praw.readthedocs.io/en/latest/ ). 
+    PRAW is the Python Reddit API Wrapper.
+    See https://www.reddit.com/wiki/api to learn how to gain access to the reddit API. 
+    '''
+    return praw.Reddit(
+        client_id='You need one of these',
+        client_secret='and one of these',
+        user_agent='and also one of these if this is going to work')
+
+def parse_bot_comment(comment):
+    ''' 
+    Get the user karma from the bot's comment. 
+    Screenscraping less than ideal, but it gets the job done.
+    '''
+    lines = comment.splitlines()
+    user = lines[0].split()[3]
+    karma = lines[2].split()[0]
+    return user, karma
+
+def report_markdown(title, players, kibitzers, wannabees, karma, cutoff):
+    ''' 
+    Print the results as markdown, so that it looks good when pasted into reddit post
+    '''
+    print('# Results for *{}*'.format(title))
+    print('')
+    print('Karma needed for eligibility: {}'.format(cutoff))
+    print('')
+    print("|   | user                          |  karma|")
+    print("|:--|:------------------------------|------:|")
+    k = 0
+    total_karma = 0
+    for player in players:
+        print('|{:>3}| {:<30}| {:>6}|'.format(k, player, karma[player]))
+        total_karma += karma[player]
+        k += 1
+
+    nplayers = len(players)
+    winning_index = total_karma % nplayers
+    print('')
+    print('Sum of contestant karma:               {}'.format(total_karma))
+    print('')
+    print('Number of eligible contestants: {}'.format(nplayers))
+    print('')
+    print('{0} modulo {1} = {2}'.format(total_karma, nplayers, winning_index))
+    print('')
+    print('Winner is number {0}, {1}'.format(winning_index, players[winning_index] ))
+    print(" ")
+    print("Our thanks to those who stopped by to chat, but did not choose to play:")
+    print(" ")
+    for k in sorted(list(kibitzers)):
+        print("-", k)
+    print(" ")
+    print('These fine propects did not yet have the {} points required to play. Next time?'.format(cutoff))
+    print(" ")
+    for k in sorted(list(wannabees)):
+        print("-", k)
+    
+def participating(text):
+    ''' Check whether comment contains marker used to indicate participation in PIF.'''
+    match = re.search(r'in!', text.lower())
+    if match: return True
+    return False
+
+def identify_participants(submission):
+    ''' 
+    Collect the authors of the top level comments according to participation.
+    Have to restrict entering contest to top level comments because the bot only posts karma 
+    for the top level comments.
+    '''
+    participants = set()
+    for comment in submission.comments:
+        if comment.author is not None:
+           if participating(comment.body):
+                participants.add('/u/' + comment.author.name)
+    return participants
+
+def gather_karma(submission):
+    ''' 
+    Collect the bot's karma judgements. Since we visit all the comments,
+    not just top level, we may as well identify all the commentors too.
+    '''
+    karma = {}
+    commentors = set() 
+    for comment in submission.comments.list():
+        if comment.author is not None:
+            commentors.add('/u/' + comment.author.name)
+            if comment.author == 'wetshaving_bot':
+              user, pts = parse_bot_comment(comment.body)
+              karma[user] = int(pts)
+    return karma, commentors
+
+def main(argv):
+    ''' 
+    Determine winner of PIF and print results.
+
+    This code is vulnerable to certain natural race conditions.
+    For instance, if you run it just after a new contestant posts
+    but before the bot chimes in with that user's karma, then looking up 
+    that user's karma would fail. Not much to be done but wait.
+    If you are running the PIF, just lock the reddit thread hosting the PIF
+    and wait a bit to give the bot time to catch up before running this script.
+    '''
+    reddit = new_client()
+    post_url, karmic_cutoff = read_cli_args(argv)
+    submission = reddit.submission(url=post_url)
+    participants = identify_participants(submission)
+    karma, commentors = gather_karma(submission)
+    kibitzers = commentors.difference(participants)
+    players = sorted([u for u in participants if karma[u] >= karmic_cutoff])
+    wannabees = sorted([u for u in participants if karma[u] < karmic_cutoff])
+    report_markdown(submission.title, players, kibitzers, wannabees, karma, karmic_cutoff)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
