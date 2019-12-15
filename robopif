@@ -6,10 +6,10 @@ import argparse
 
 def read_cli_args(argv):
     ''' 
-    Read user-supplied sarguments from the command line. 
+    Read user-supplied arguments from the command line. 
     '''
     parser = argparse.ArgumentParser()
-    parser.add_argument('-u','--pif_url', help='The url for the PIF.', required=True)
+    parser.add_argument('pif_url', help='The url for the PIF.')
     parser.add_argument('-k','--min_karma', type=int, help='Number of karma points required to participate.', required=False)
     args = parser.parse_args()
     # Default to zero karma requirement if no requirement is provided.
